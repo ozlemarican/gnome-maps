@@ -39,7 +39,7 @@ const TransitPlan = imports.transitPlan;
 const Utils = imports.utils;
 
 const BASE_URL = 'https://api.resrobot.se';
-const API_VERSION = 'v2';
+const API_VERSION = 'v2.1';
 
 // Timezone for timestamps returned by this provider
 const NATIVE_TIMEZONE = 'Europe/Stockholm';
@@ -93,11 +93,11 @@ var Resrobot = class Resrobot {
         this._session = new Soup.Session({ user_agent : 'gnome-maps/' + pkg.version });
         this._plan = Application.routingDelegator.transitRouter.plan;
         this._query = Application.routeQuery;
-        this._key = params.key;
+        this._accessId = params.accessId;
         this._tz = GLib.TimeZone.new(NATIVE_TIMEZONE);
 
-        if (!this._key)
-            throw new Error('missing key');
+        if (!this._accessId)
+            throw new Error('missing accessId');
     }
 
     fetchFirstResults() {
@@ -140,16 +140,19 @@ var Resrobot = class Resrobot {
                                '/location.nearbystops?' + query.toString());
         let request = new Soup.Message({ method: 'GET', uri: uri });
 
+        log('uri: ' + BASE_URL + '/' + API_VERSION +
+                               '/location.nearbystops?' + query.toString());
+
         this._session.queue_message(request, (obj, message) => {
             if (message.status_code !== Soup.Status.OK) {
-                Utils.debug('Failed to get nearby stops: ' + message.status_code);
+                log('Failed to get nearby stops: ' + message.status_code);
                 this._noRouteFound();
             } else {
                 try {
                     let result = JSON.parse(message.response_body.data);
                     let stopLocations = result.StopLocation;
 
-                    Utils.debug('nearby stops: ' + JSON.stringify(result, null, 2));
+                    log('nearby stops: ' + JSON.stringify(result, null, 2));
 
                     if (stopLocations && stopLocations.length > 0) {
                         let stopLocation = stopLocations[0];
@@ -174,6 +177,9 @@ var Resrobot = class Resrobot {
         let uri = new Soup.URI(BASE_URL + '/' + API_VERSION + '/trip?' +
                                query.toString());
         let request = new Soup.Message({ method: 'GET', uri: uri });
+
+        log('uri: ' + BASE_URL + '/' + API_VERSION + '/trip?' +
+                               query.toString());
 
         this._session.queue_message(request, (obj, message) => {
             if (message.status_code !== Soup.Status.OK) {
@@ -372,6 +378,7 @@ var Resrobot = class Resrobot {
     }
 
     _createLegs(legs) {
+        log('legs: ' + JSON.stringify(legs, null, 2));
         let result = legs.map((leg, index, legs) => this._createLeg(leg, index, legs));
 
         if (this._canLegBeIgnored(result[0]))
@@ -404,6 +411,8 @@ var Resrobot = class Resrobot {
     _createLeg(leg, index, legs) {
         let isTransit;
 
+        log('leg: ' + JSON.stringify(leg, '', 2));
+
         if (leg.type === LegType.TRANSIT)
             isTransit = true;
         else if (leg.type === LegType.WALK || leg.type === LegType.TRANSFER)
@@ -413,7 +422,9 @@ var Resrobot = class Resrobot {
 
         let origin = leg.Origin;
         let destination = leg.Destination;
-        let product = leg.Product;
+        let product = leg.Product?.[0];
+
+        log('product: ' + product);
 
         if (!origin)
             throw new Error('Missing Origin element');
@@ -441,7 +452,6 @@ var Resrobot = class Resrobot {
         let routeType =
             isTransit ? this._getHVTCodeFromCatCode(product.catCode) : null;
         let agencyName = isTransit ? product.operator : null;
-        let agencyUrl = isTransit ? product.operatorUrl : null;
         let polyline = this._createPolylineForLeg(leg);
         let duration = leg.duration ? this._parseDuration(leg.duration) : null;
 
@@ -461,7 +471,6 @@ var Resrobot = class Resrobot {
                                            distance:             leg.dist,
                                            duration:             duration,
                                            agencyName:           agencyName,
-                                           agencyUrl:            agencyUrl,
                                            agencyTimezoneOffset: tzOffset,
                                            tripShortName:        route });
 
@@ -558,11 +567,12 @@ var Resrobot = class Resrobot {
         let originLocation = points[0].place.location;
         let destLocation = points.last().place.location;
         let transitOptions = this._query.transitOptions;
-        let params = { key:             this._key,
+        let params = { accessId:        this._accessId,
                        originCoordLat:  originLocation.latitude,
                        originCoordLong: originLocation.longitude,
                        destCoordLat:    destLocation.latitude,
                        destCoordLong:   destLocation.longitude,
+                       passlist:        1,
                        format:          'json' };
 
         if (!transitOptions.showAllTransitTypes)
@@ -588,7 +598,7 @@ var Resrobot = class Resrobot {
     }
 
     _getNearbyStopsQueryParams(lat, lon, num, radius) {
-        let params = { key:             this._key,
+        let params = { accessId:        this._accessId,
                        originCoordLat:  lat,
                        originCoordLong: lon,
                        maxNo:           num,
